@@ -1,0 +1,132 @@
+---
+title: "Integrated scRNA-seq analysis of embryonic and adult neurons"
+author: "Christian Mayer, Andrew Butler, Rahul Satija"
+date: "2/27/2018"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE, tidy = TRUE)
+```
+
+Data and code associated with the paper
+
+Developmental diversification of cortical inhibitory interneurons
+
+by Christian Mayer\#, Christoph Hafemeister\#, Rachel C. Bandler\#, Robert Machold, Renata Batista Brito, Xavier Jaglin, Kathryn Allaway, Andrew Butler, Gord Fishell\* and Rahul Satija\*
+\#Equal contribution
+\*Corresponding authors
+
+Nature (2018) doi:10.1038/nature25999
+
+This script performs the alignment of embryonic precursor cells (E18) with adult cortical interneurons to identify shared sources of transcriptomic heterogeneity. 
+
+
+# Install Seurat from GitHub 
+In Mayer et al. 2018 we used a slightly modified version of Seurat that can be installed via GitHub. 
+```{r install, echo=TRUE, results = 'hide', message = FALSE}
+library(devtools)
+install_github("mayer-lab/SeuratForMayer2018")
+library(Seurat)
+library(pbapply)
+```
+
+# Load Seurat Objects 
+Loading pre-processed Seurat objects of an embryonic (E18.Rda) and an adult (P56.Rda) stage. The E18 dataset consists of Dlx6a-cre;Ai9 fate labeled cortical cells, isolated by FACS at E18.5 and sequenced using the 10x Genomics platform. For the P56 dataset, we downloaded FPKM expression values for single cells of the mouse visual cortex from a publicly available resource at the Allen Brain Atlas (http://celltypes.brain-map.org/rnaseq). The P56 Seurat object contains a selection of GABAergic cells.
+
+The E18 Seurat object can be downloaded here: https://www.dropbox.com/s/exh006j64r9y8s3/E18.Rda.zip?dl=0
+
+The P56 Seurat object can be downloaded here: https://www.dropbox.com/s/fgmr501f56se7m4/P56.Rda.zip?dl=0
+
+```{r dataimport, echo=TRUE, results = 'hide', message = FALSE}
+load("~/Datashare/GitHub/P56.Rda")
+load("~/Datashare/GitHub/E18.Rda")
+```
+
+The P56 Seurat object features previously assigned subtype information in the metadata. Cells were grouped into cardinal types and sub-types based on the expression of canonical markers.
+```{r Metadata, echo=TRUE, results = 'show'}
+table(P56@meta.data[, "Adult_Subtypes"])
+table(P56@meta.data[, "Adult_Subtypes_Annotated"]) 
+```
+
+# Seurat Alignment procedure
+The following alignment procedure was adapted from Seurat’s tutorials (http://satijalab.org/seurat/Seurat_AlignmentTutorial.html)
+
+Add Metadata for easy identification later.
+```{r metadata2, echo=TRUE, results = 'hide'}
+P56@meta.data[, "DevStage"] <- "P56"
+E18@meta.data[, "DevStage"] <- "E18"
+E18@meta.data[, "Adult_Subtypes"] <- "E18" #We add E18 here because precursor cells are not assigned to subtypes yet. 
+```
+
+Run a canonical correlation analysis to identify common sources of variation between the two datasets. RunCCA will combine the two objects into a single object. 
+```{r cca, echo=TRUE, results = 'hide'}
+ccaE18 <- RunCCA(E18, P56)
+```
+
+Align the CCA subspaces. This returns a new dimensional reduction called cca.aligned. 
+```{r alignsubspace, echo=TRUE, results = 'show'}
+ccaE18 <- AlignSubspace(ccaE18, reduction.type = "cca", grouping.var = "DevStage", dims.align = 1:10, display.progress = FALSE) 
+```
+
+Run t-distributed stochastic neighbour embedding (t-SNE) dimensionality reduction on the integrated dataset. We selected CCVs for which at least 30 genes exhibited a minimum bicor of 0.15 in both datasets (see results from AlignSubspace of the modified Seurat version that was used here).
+```{r runtsne, echo=TRUE, results = 'hide'}
+ccaE18 <- RunTSNE(ccaE18, reduction.use = "cca.aligned", dims.use = 1:5) #Use dims that passed cutoff in AlignSubspace
+```
+
+Visualize the aligned CCA
+```{r viz.alignment, echo=TRUE, results = 'show'}
+TSNEPlot(ccaE18, group.by = "DevStage")
+ccaE18@meta.data[, "Adult_Subtypes"] <- factor(ccaE18@meta.data[, "Adult_Subtypes"], levels  = c("Pvalb", "Sst", "Vip", "Id2", "Igfbp6", "Th", "Nos1", "E18")) 
+TSNEPlot(ccaE18, group.by = "Adult_Subtypes", colors.use = c("#0F4DA8", "#FFA100", "#BE008A", "#B4F200", "gray10", "gray30", "gray60", "lightgray", "gray95"))
+```
+
+#Assignment of E18 precursor cells to adult subtypes
+For each cell in the developmental dataset, we calculated the k = 10 closest neighbours in the P56 dataset, using the selected CCV for the input distance matrix. If at least 9 of these neighbours in the P56 dataset were of the same subtype, the developmental cell was assigned to this subtype. As a secondary check, for each developmental cell, we calculated the nearest k = 10 neighbours across all cells in the merged developmental and adult dataset. If none of these 10 neighbours represented cells in the P56 dataset, we also considered the cell to be unassigned. 
+```{r Assignment, echo=TRUE, message=FALSE, warning=FALSE, results='hide'}
+ccaE18 <- MapCells(ccaE18, timepoint.dev = "E18", map.col = "Adult_Subtypes", new.col = "Map1", thresh.require = 0.9, num.k = 10)
+```
+
+Visualization of assignment 
+```{r viz.assignment, echo=TRUE, results = 'show'}
+ccaE18@meta.data$MapStage <- apply(ccaE18@meta.data, MARGIN = 1, FUN = function(x) {
+  if (x["DevStage"] == "E18"){ paste(x["DevStage"], x["Map1"])
+  } else { x["DevStage"] }
+})
+ccaE18@meta.data$MapStage <- factor(ccaE18@meta.data$MapStage, levels = c("E18 Pvalb", "E18 Sst", "E18 Vip", "E18 Id2", "E18 Igfbp6", "E18 Th", "E18 Nos1", "E18 NA", "P56"))
+TSNEPlot(ccaE18,group.by = "MapStage", pt.size = 0.1, colors.use = c("#0F4DA8", "#FFA100", "#BE008A", "#B4F200", "gray10", "gray30", "gray60", "gray95", "yellow"))
+```
+
+#Find marker genes that are conserved between embryo and adult
+To identify differentially expressed genes that were conserved across development, we used the FindConservedMarkers command in Seurat, which runs differential expression tests separately on both developmental and adult datasets. We required genes to have a 1.25-fold change, with a Bonferroni-corrected P value threshold of 0.05 in both developmental and adult datasets to be considered a conserved marker. 
+
+```{r marker1, echo=TRUE, results = 'hide'}
+ccaE18 <- SetAllIdent(ccaE18, id = "Map1")
+pval.thresh <- 0.05 / 14162
+```
+Pvalb vs Sst 
+```{r marker2, echo=TRUE, results = 'hide'}
+E18.Pvalb_Sst.conserved <- FindConservedMarkers(ccaE18, ident.1 = "Pvalb", ident.2 = "Sst", grouping.var = "DevStage", thresh.use = log(1.25))
+E18.Pvalb_Sst.conserved <- subset(E18.Pvalb_Sst.conserved, max_pval < pval.thresh)
+E18.Pvalb_Sst <- rownames(subset(E18.Pvalb_Sst.conserved, E18_avg_diff > log(1.25)))
+E18.Sst_Pvalb <- rownames(subset(E18.Pvalb_Sst.conserved, E18_avg_diff < (-1 * log(1.25))))
+```
+
+```{r Pvalb_Sst, echo=TRUE, results = 'show'}
+E18.Pvalb_Sst
+E18.Sst_Pvalb
+```
+
+Vip vs Id2
+
+```{r marker3, echo=TRUE, results = 'hide'}
+E18.Vip_Id2.conserved <- FindConservedMarkers(ccaE18, ident.1 = "Vip", ident.2 = "Id2", grouping.var = "DevStage", thresh.use = log(1.25))
+E18.Vip_Id2.conserved <- subset(E18.Vip_Id2.conserved, max_pval < pval.thresh)
+E18.Vip_Id2 <- rownames(subset(E18.Vip_Id2.conserved, E18_avg_diff > log(1.25)))
+E18.Id2_Vip <- rownames(subset(E18.Vip_Id2.conserved, E18_avg_diff < (-1 * log(1.25))))
+```
+
+```{r Vip_Id2, echo=TRUE, results = 'show'}
+E18.Vip_Id2
+E18.Id2_Vip
+```
