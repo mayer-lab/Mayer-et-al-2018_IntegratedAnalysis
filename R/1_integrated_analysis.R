@@ -12,7 +12,7 @@ library(reshape2, ggplot2)
 library(gplots)
 library(FNN)
 
-# Pre-processed Seurat objects can be downloaded here: https://www.dropbox.com/s/qe2carqnf9eu4sd/Filtered_Mayer-et-al.Rda.zip?dl=0
+# Pre-processed Seurat objects can be downloaded here: https://dl.dropbox.com/s/qe2carqnf9eu4sd/Filtered_Mayer-et-al.Rda.zip?dl=1
 load("~/Datashare/Filtered_Mayer-et-al.Rda") 
 # color Palette URL: http://paletton.com/#uid=7531q0kw0w0jyC+oRxVy4oIDfjr
 c.AT1 <- c("#0F4DA8","#FFA100","#BE008A","#B4F200","gray10","gray20","gray30","lightgray","gray95") #AT1 "Pvalb","Sst","Vip","Id2","Igfbp6","Th","Nos1","P10"
